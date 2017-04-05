@@ -308,10 +308,10 @@ func main() {
 		if err != nil {
 			err = i18n.WrapError(err)
 
-			//fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, err)
 
 			if ctx.DebugLevel >= 10 {
-				//fmt.Fprintln(os.Stderr, err.(*errors.Error).ErrorStack())
+				fmt.Fprintln(os.Stderr, err.(*errors.Error).ErrorStack())
 			}
 
 			// TODO: try to recompile the library with another architecture
