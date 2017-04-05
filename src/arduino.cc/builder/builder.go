@@ -123,20 +123,11 @@ func (s *Builder) Run(ctx *types.Context) error {
 
 	mainErr := runCommands(ctx, commands, true)
 
-	commands = []types.Command{
-		&PrintUsedAndNotUsedLibraries{SketchError: mainErr != nil},
-
-		&PrintUsedLibrariesIfVerbose{},
-
-		&phases.Sizer{SketchError: mainErr != nil},
-	}
-	otherErr := runCommands(ctx, commands, false)
-
 	if mainErr != nil {
 		return mainErr
 	}
 
-	return otherErr
+	return nil
 }
 
 type Preprocess struct{}

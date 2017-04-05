@@ -273,8 +273,6 @@ func main() {
 
 		sketch := includeHeadersFromLibraryFolder(library)
 
-		fmt.Println(sketch)
-
 		sketch += "\nvoid loop(){}\nvoid setup(){}\n"
 
 		ioutil.WriteFile(ctx.SketchLocation, []byte(sketch), 0666)
@@ -287,10 +285,15 @@ func main() {
 		//os.Remove(buildPath + "/libraries")
 
 		var deps []string
+		var internal_deps []string
 
 		for _, dep := range ctx.ImportedLibraries {
-			if dep.RealName != library.RealName && !utils.SliceContains(deps, dep.RealName) {
-				deps = append(deps, dep.RealName)
+			if dep.RealName != library.RealName && !utils.SliceContains(deps, dep.RealName) && !utils.SliceContains(internal_deps, dep.RealName) {
+				if strings.Contains(dep.Folder, ctx.OtherLibrariesFolders[0]) {
+					deps = append(deps, dep.RealName)
+				} else {
+					internal_deps = append(internal_deps, dep.RealName)
+				}
 			}
 		}
 
@@ -317,23 +320,28 @@ func main() {
 			ctx.ImportedLibraries = ctx.ImportedLibraries[:0]
 			ctx.IncludeFolders = ctx.IncludeFolders[:0]
 
-			fmt.Println("Compiling example: " + example)
 			err = builder.RunBuilder(ctx)
 
 			for _, dep := range ctx.ImportedLibraries {
-				if dep.RealName != library.RealName && !utils.SliceContains(deps, dep.RealName) {
-					deps = append(deps, dep.RealName)
+				if dep.RealName != library.RealName && !utils.SliceContains(deps, dep.RealName) && !utils.SliceContains(internal_deps, dep.RealName) {
+					if strings.Contains(dep.Folder, ctx.OtherLibrariesFolders[0]) {
+						deps = append(deps, dep.RealName)
+					} else {
+						internal_deps = append(internal_deps, dep.RealName)
+					}
 				}
 			}
+		}
+		fmt.Print("library " + library.Name + " depends on: ")
+		fmt.Print(deps)
+		fmt.Print(" provided by lib manager and ")
+		fmt.Print(internal_deps)
+		fmt.Print(" provided by cores or builtin")
 
-			fmt.Print("library " + library.Name + " depends on ")
-			fmt.Print(deps)
-
-			if err != nil {
-				fmt.Println(" but failed to compile on " + ctx.FQBN)
-			} else {
-				fmt.Println("")
-			}
+		if err != nil {
+			fmt.Println(" but failed to compile on " + ctx.FQBN)
+		} else {
+			fmt.Println("")
 		}
 	}
 }
