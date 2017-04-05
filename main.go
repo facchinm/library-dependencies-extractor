@@ -289,21 +289,12 @@ func main() {
 		var deps []string
 
 		for _, dep := range ctx.ImportedLibraries {
-			if dep.Name != library.Name {
-				deps = append(deps, dep.Name)
+			if dep.RealName != library.RealName && !utils.SliceContains(deps, dep.RealName) {
+				deps = append(deps, dep.RealName)
 			}
 		}
 
 		ctx.Libraries[i].Dependencies = deps
-
-		fmt.Print("library " + library.Name + " depends on ")
-		fmt.Print(deps)
-
-		if err != nil {
-			fmt.Println(" but failed to compile on " + ctx.FQBN)
-		} else {
-			fmt.Println("")
-		}
 
 		if err != nil {
 			err = i18n.WrapError(err)
@@ -316,6 +307,33 @@ func main() {
 
 			// TODO: try to recompile the library with another architecture
 
+		}
+
+		// search for exaples and compile them
+		libraryExamplesPath := filepath.Join(library.Folder, "examples")
+		examples, _ := findFilesInFolder(libraryExamplesPath, ".ino", true)
+		for _, example := range examples {
+			ctx.SketchLocation = example
+			ctx.ImportedLibraries = ctx.ImportedLibraries[:0]
+			ctx.IncludeFolders = ctx.IncludeFolders[:0]
+
+			fmt.Println("Compiling example: " + example)
+			err = builder.RunBuilder(ctx)
+
+			for _, dep := range ctx.ImportedLibraries {
+				if dep.RealName != library.RealName && !utils.SliceContains(deps, dep.RealName) {
+					deps = append(deps, dep.RealName)
+				}
+			}
+
+			fmt.Print("library " + library.Name + " depends on ")
+			fmt.Print(deps)
+
+			if err != nil {
+				fmt.Println(" but failed to compile on " + ctx.FQBN)
+			} else {
+				fmt.Println("")
+			}
 		}
 	}
 }

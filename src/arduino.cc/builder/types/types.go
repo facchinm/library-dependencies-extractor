@@ -168,6 +168,7 @@ type Library struct {
 	UtilityFolder string
 	Layout        LibraryLayout
 	Name          string
+	RealName      string
 	Archs         []string
 	Dependencies  []string
 	DotALinkage   bool
