@@ -258,6 +258,9 @@ func main() {
 		if utils.SliceContains(library.Archs, "samd") {
 			ctx.FQBN = "arduino:samd:arduino_zero_edbg"
 		}
+		if utils.SliceContains(library.Archs, "arc32") {
+			ctx.FQBN = "Intel:arc32:arduino_101"
+		}
 		if utils.SliceContains(library.Archs, "esp8266") {
 			ctx.FQBN = "esp8266:esp8266:nodemcuv2:CpuFrequency=80,UploadSpeed=115200,FlashSize=4M3M"
 		}
