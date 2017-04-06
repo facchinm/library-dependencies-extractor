@@ -49,6 +49,7 @@ const FLAG_LOGGER_HUMAN = "human"
 const FLAG_LOGGER_MACHINE = "machine"
 const FLAG_VERSION = "version"
 const FLAG_VID_PID = "vid-pid"
+const FLAG_JSON = "json"
 
 type foldersFlag []string
 
@@ -91,6 +92,7 @@ var toolsFoldersFlag foldersFlag
 var librariesBuiltInFoldersFlag foldersFlag
 var librariesFoldersFlag foldersFlag
 var customBuildPropertiesFlag propertiesFlag
+var librariesJsonPath *string
 var fqbnFlag *string
 var coreAPIVersionFlag *string
 var ideVersionFlag *string
@@ -102,6 +104,33 @@ var warningsLevelFlag *string
 var loggerFlag *string
 var vidPidFlag *string
 
+// Output structure used to generate library_index.json file
+type indexOutput struct {
+	Libraries []indexLibrary `json:"libraries"`
+}
+
+// Output structure used to generate library_index.json file
+type indexLibrary struct {
+	LibraryName     string   `json:"name"`
+	Version         string   `json:"version"`
+	Author          string   `json:"author"`
+	Maintainer      string   `json:"maintainer"`
+	License         string   `json:"license,omitempty"`
+	Sentence        string   `json:"sentence"`
+	Paragraph       string   `json:"paragraph,omitempty"`
+	Website         string   `json:"website,omitempty"`
+	Category        string   `json:"category,omitempty"`
+	Architectures   []string `json:"architectures,omitempty"`
+	Types           []string `json:"types,omitempty"`
+	Requires        []string `json:"requires,omitempty"`
+	URL             string   `json:"url"`
+	ArchiveFileName string   `json:"archiveFileName"`
+	Size            int64    `json:"size"`
+	Checksum        string   `json:"checksum"`
+
+	SupportLevel string `json:"supportLevel,omitempty"`
+}
+
 func init() {
 	buildOptionsFileFlag = flag.String(FLAG_BUILD_OPTIONS_FILE, "", "Instead of specifying --"+FLAG_HARDWARE+", --"+FLAG_TOOLS+" etc every time, you can load all such options from a file")
 	flag.Var(&hardwareFoldersFlag, FLAG_HARDWARE, "Specify a 'hardware' folder. Can be added multiple times for specifying multiple 'hardware' folders")
@@ -110,8 +139,8 @@ func init() {
 	flag.Var(&librariesFoldersFlag, FLAG_LIBRARIES, "Specify a 'libraries' folder. Can be added multiple times for specifying multiple 'libraries' folders")
 	flag.Var(&customBuildPropertiesFlag, FLAG_PREFS, "Specify a custom preference. Can be added multiple times for specifying multiple custom preferences")
 	fqbnFlag = flag.String(FLAG_FQBN, "", "fully qualified board name")
-	coreAPIVersionFlag = flag.String(FLAG_CORE_API_VERSION, "10600", "version of core APIs (used to populate ARDUINO #define)")
-	ideVersionFlag = flag.String(FLAG_IDE_VERSION, "10600", "[deprecated] use '"+FLAG_CORE_API_VERSION+"' instead")
+	coreAPIVersionFlag = flag.String(FLAG_CORE_API_VERSION, "10800", "version of core APIs (used to populate ARDUINO #define)")
+	ideVersionFlag = flag.String(FLAG_IDE_VERSION, "10800", "[deprecated] use '"+FLAG_CORE_API_VERSION+"' instead")
 	buildPathFlag = flag.String(FLAG_BUILD_PATH, "", "build path")
 	verboseFlag = flag.Bool(FLAG_VERBOSE, false, "if 'true' prints lots of stuff")
 	quietFlag = flag.Bool(FLAG_QUIET, false, "if 'true' doesn't print any warnings or progress or whatever")
@@ -119,6 +148,7 @@ func init() {
 	warningsLevelFlag = flag.String(FLAG_WARNINGS, "", "Sets warnings level. Available values are '"+FLAG_WARNINGS_NONE+"', '"+FLAG_WARNINGS_DEFAULT+"', '"+FLAG_WARNINGS_MORE+"' and '"+FLAG_WARNINGS_ALL+"'")
 	loggerFlag = flag.String(FLAG_LOGGER, FLAG_LOGGER_HUMAN, "Sets type of logger. Available values are '"+FLAG_LOGGER_HUMAN+"', '"+FLAG_LOGGER_MACHINE+"'")
 	vidPidFlag = flag.String(FLAG_VID_PID, "", "specify to use vid/pid specific build properties, as defined in boards.txt")
+	librariesJsonPath = flag.String(FLAG_JSON, "", "specify the starting json file")
 }
 
 func main() {
@@ -139,6 +169,12 @@ func main() {
 			}
 		}
 		ctx.InjectBuildOptions(buildOptions)
+	}
+
+	// FLAG json
+	if *librariesJsonPath == "" {
+		fmt.Println("You need to pass the path of a library_index.json")
+		os.Exit(1)
 	}
 
 	// FLAG_HARDWARE
@@ -241,7 +277,28 @@ func main() {
 	buildCachePath, _ := ioutil.TempDir("", "core_cache")
 	ctx.BuildCachePath = buildCachePath
 
-	for i, library := range ctx.Libraries {
+	var indexJson indexOutput
+	dec, _ := ioutil.ReadFile(*librariesJsonPath)
+
+	err = json.Unmarshal(dec, &indexJson)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+
+	for _, library := range ctx.Libraries {
+
+		libIndex := indexJsonContains(indexJson.Libraries, library.RealName, library.Version)
+
+		if libIndex == -1 {
+			// library not in index, don't create dependency tree
+			continue
+		}
+
+		if len(indexJson.Libraries[libIndex].Requires) > 0 {
+			// remember to encode the empty string as a valid dependency (eg. with "none")
+			continue
+		}
 
 		if library.Archs[0] == "*" || utils.SliceContains(library.Archs, "avr") {
 			ctx.FQBN = "arduino:avr:micro"
@@ -300,6 +357,8 @@ func main() {
 			}
 		}
 
+		indexJson.Libraries[libIndex].Requires = deps
+
 		//ctx.Libraries[i].Dependencies = deps
 
 		fmt.Print("Library " + library.Name + " depends on: ")
@@ -356,6 +415,19 @@ func main() {
 			fmt.Println("")
 		}
 	}
+
+	finalJson, _ := json.MarshalIndent(&indexJson, "", "    ")
+	ioutil.WriteFile(*librariesJsonPath, finalJson, 0666)
+
+}
+
+func indexJsonContains(index []indexLibrary, name, version string) int {
+	for idx, lib := range index {
+		if lib.LibraryName == name && lib.Version == version {
+			return idx
+		}
+	}
+	return -1
 }
 
 func includeHeadersFromLibraryFolder(library *types.Library) string {
