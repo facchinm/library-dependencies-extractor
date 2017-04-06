@@ -300,7 +300,13 @@ func main() {
 			}
 		}
 
-		ctx.Libraries[i].Dependencies = deps
+		//ctx.Libraries[i].Dependencies = deps
+
+		fmt.Print("Library " + library.Name + " depends on: ")
+		fmt.Print(deps)
+		fmt.Print(" provided by lib manager and ")
+		fmt.Print(internal_deps)
+		fmt.Println(" provided by cores or builtin")
 
 		if err != nil {
 			err = i18n.WrapError(err)
@@ -315,7 +321,10 @@ func main() {
 
 		}
 
-		// search for exaples and compile them
+		// TODO: are examples really important? Or can we stick to the "base" experience?
+		continue
+
+		// search for examples and compile them
 		libraryExamplesPath := filepath.Join(library.Folder, "examples")
 		examples, _ := findFilesInFolder(libraryExamplesPath, ".ino", true)
 		for _, example := range examples {
@@ -335,7 +344,7 @@ func main() {
 				}
 			}
 		}
-		fmt.Print("library " + library.Name + " depends on: ")
+		fmt.Print("Examples for " + library.Name + " depends on: ")
 		fmt.Print(deps)
 		fmt.Print(" provided by lib manager and ")
 		fmt.Print(internal_deps)
