@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -98,6 +99,8 @@ var coreAPIVersionFlag *string
 var ideVersionFlag *string
 var buildPathFlag *string
 var verboseFlag *bool
+var forceRebuild *bool
+var exampleFlag *bool
 var quietFlag *bool
 var debugLevelFlag *int
 var warningsLevelFlag *string
@@ -109,24 +112,28 @@ type indexOutput struct {
 	Libraries []indexLibrary `json:"libraries"`
 }
 
+type requiresField struct {
+	Requires []string `json:"requires"`
+}
+
 // Output structure used to generate library_index.json file
 type indexLibrary struct {
-	LibraryName     string   `json:"name"`
-	Version         string   `json:"version"`
-	Author          string   `json:"author"`
-	Maintainer      string   `json:"maintainer"`
-	License         string   `json:"license,omitempty"`
-	Sentence        string   `json:"sentence"`
-	Paragraph       string   `json:"paragraph,omitempty"`
-	Website         string   `json:"website,omitempty"`
-	Category        string   `json:"category,omitempty"`
-	Architectures   []string `json:"architectures,omitempty"`
-	Types           []string `json:"types,omitempty"`
-	Requires        []string `json:"requires,omitempty"`
-	URL             string   `json:"url"`
-	ArchiveFileName string   `json:"archiveFileName"`
-	Size            int64    `json:"size"`
-	Checksum        string   `json:"checksum"`
+	LibraryName     string           `json:"name"`
+	Version         string           `json:"version"`
+	Author          string           `json:"author"`
+	Maintainer      string           `json:"maintainer"`
+	License         string           `json:"license,omitempty"`
+	Sentence        string           `json:"sentence"`
+	Paragraph       string           `json:"paragraph,omitempty"`
+	Website         string           `json:"website,omitempty"`
+	Category        string           `json:"category,omitempty"`
+	Architectures   []string         `json:"architectures,omitempty"`
+	Types           []string         `json:"types,omitempty"`
+	Requires        *json.RawMessage `json:"requires"`
+	URL             string           `json:"url"`
+	ArchiveFileName string           `json:"archiveFileName"`
+	Size            int64            `json:"size"`
+	Checksum        string           `json:"checksum"`
 
 	SupportLevel string `json:"supportLevel,omitempty"`
 }
@@ -143,6 +150,8 @@ func init() {
 	ideVersionFlag = flag.String(FLAG_IDE_VERSION, "10800", "[deprecated] use '"+FLAG_CORE_API_VERSION+"' instead")
 	buildPathFlag = flag.String(FLAG_BUILD_PATH, "", "build path")
 	verboseFlag = flag.Bool(FLAG_VERBOSE, false, "if 'true' prints lots of stuff")
+	forceRebuild = flag.Bool("force", false, "if 'true' rebuilds all dependencies from scratch")
+	exampleFlag = flag.Bool("examples", false, "Also compile all the builtin example")
 	quietFlag = flag.Bool(FLAG_QUIET, false, "if 'true' doesn't print any warnings or progress or whatever")
 	debugLevelFlag = flag.Int(FLAG_DEBUG_LEVEL, builder.DEFAULT_DEBUG_LEVEL, "Turns on debugging messages. The higher, the chattier")
 	warningsLevelFlag = flag.String(FLAG_WARNINGS, "", "Sets warnings level. Available values are '"+FLAG_WARNINGS_NONE+"', '"+FLAG_WARNINGS_DEFAULT+"', '"+FLAG_WARNINGS_MORE+"' and '"+FLAG_WARNINGS_ALL+"'")
@@ -286,6 +295,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		tempJsonCTRL, err := json.MarshalIndent(&indexJson, "", "    ")
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+		ioutil.WriteFile(*librariesJsonPath, tempJsonCTRL, 0666)
+		fmt.Println("Exiting due to CTRL+C")
+		os.Exit(2)
+	}()
+
 	for _, library := range ctx.Libraries {
 
 		libIndex := indexJsonContains(indexJson.Libraries, library.RealName, library.Version)
@@ -295,8 +317,10 @@ func main() {
 			continue
 		}
 
-		if len(indexJson.Libraries[libIndex].Requires) > 0 {
-			// remember to encode the empty string as a valid dependency (eg. with "none")
+		if indexJson.Libraries[libIndex].Requires != nil && *forceRebuild == false {
+			// we already have analyzed the dependencies, skip
+			// if forceRebuild == true, rebuild them anyway
+			fmt.Println(string(*indexJson.Libraries[libIndex].Requires))
 			continue
 		}
 
@@ -357,8 +381,6 @@ func main() {
 			}
 		}
 
-		indexJson.Libraries[libIndex].Requires = deps
-
 		//ctx.Libraries[i].Dependencies = deps
 
 		fmt.Print("Library " + library.Name + " depends on: ")
@@ -380,45 +402,64 @@ func main() {
 
 		}
 
-		// TODO: are examples really important? Or can we stick to the "base" experience?
-		continue
+		// TODO: HACK: WARNING: ATTENTION: are examples really important? Or can we stick to the "base" experience?
+		//continue
 
-		// search for examples and compile them
-		libraryExamplesPath := filepath.Join(library.Folder, "examples")
-		examples, _ := findFilesInFolder(libraryExamplesPath, ".ino", true)
-		for _, example := range examples {
-			ctx.SketchLocation = example
-			ctx.ImportedLibraries = ctx.ImportedLibraries[:0]
-			ctx.IncludeFolders = ctx.IncludeFolders[:0]
+		if *exampleFlag == true {
 
-			err = builder.RunBuilder(ctx)
+			// search for examples and compile them
+			libraryExamplesPath := filepath.Join(library.Folder, "examples")
+			examples, _ := findFilesInFolder(libraryExamplesPath, ".ino", true)
+			for _, example := range examples {
+				ctx.SketchLocation = example
+				ctx.ImportedLibraries = ctx.ImportedLibraries[:0]
+				ctx.IncludeFolders = ctx.IncludeFolders[:0]
 
-			for _, dep := range ctx.ImportedLibraries {
-				if dep.RealName != library.RealName && !utils.SliceContains(deps, dep.RealName) && !utils.SliceContains(internal_deps, dep.RealName) {
-					if strings.Contains(dep.Folder, ctx.OtherLibrariesFolders[0]) {
-						deps = append(deps, dep.RealName)
-					} else {
-						internal_deps = append(internal_deps, dep.RealName)
+				err = builder.RunBuilder(ctx)
+
+				for _, dep := range ctx.ImportedLibraries {
+					if dep.RealName != library.RealName && !utils.SliceContains(deps, dep.RealName) && !utils.SliceContains(internal_deps, dep.RealName) {
+						if strings.Contains(dep.Folder, ctx.OtherLibrariesFolders[0]) {
+							deps = append(deps, dep.RealName)
+						} else {
+							internal_deps = append(internal_deps, dep.RealName)
+						}
 					}
 				}
 			}
-		}
-		fmt.Print("Examples for " + library.Name + " depends on: ")
-		fmt.Print(deps)
-		fmt.Print(" provided by lib manager and ")
-		fmt.Print(internal_deps)
-		fmt.Print(" provided by cores or builtin")
+			fmt.Print("Examples for " + library.Name + " depends on: ")
+			fmt.Print(deps)
+			fmt.Print(" provided by lib manager and ")
+			fmt.Print(internal_deps)
+			fmt.Print(" provided by cores or builtin")
 
-		if err != nil {
-			fmt.Println(" but failed to compile on " + ctx.FQBN)
-		} else {
-			fmt.Println("")
+			if err != nil {
+				fmt.Println(" but failed to compile on " + ctx.FQBN)
+			} else {
+				fmt.Println("")
+			}
+
 		}
+
+		indexJson.Libraries[libIndex].Requires = new(json.RawMessage)
+
+		*indexJson.Libraries[libIndex].Requires, _ = json.Marshal(deps)
+		fmt.Println(string(*indexJson.Libraries[libIndex].Requires))
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		tempJson, _ := json.MarshalIndent(&indexJson.Libraries[libIndex], "", "    ")
+		fmt.Println(string(tempJson))
 	}
 
-	finalJson, _ := json.MarshalIndent(&indexJson, "", "    ")
+	finalJson, err := json.MarshalIndent(&indexJson, "", "    ")
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	fmt.Println("finalJson")
+	fmt.Println(string(finalJson))
 	ioutil.WriteFile(*librariesJsonPath, finalJson, 0666)
-
 }
 
 func indexJsonContains(index []indexLibrary, name, version string) int {
