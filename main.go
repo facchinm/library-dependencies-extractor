@@ -17,7 +17,6 @@ import (
 	"arduino.cc/builder/i18n"
 	"arduino.cc/builder/types"
 	"arduino.cc/builder/utils"
-	"arduino.cc/properties"
 	"github.com/go-errors/errors"
 	"github.com/masatana/go-textdistance"
 )
@@ -87,76 +86,62 @@ func (h *propertiesFlag) Set(value string) error {
 	return nil
 }
 
-var buildOptionsFileFlag *string
 var hardwareFoldersFlag foldersFlag
 var toolsFoldersFlag foldersFlag
 var librariesBuiltInFoldersFlag foldersFlag
 var librariesFoldersFlag foldersFlag
-var customBuildPropertiesFlag propertiesFlag
 var librariesJsonPath *string
-var fqbnFlag *string
-var coreAPIVersionFlag *string
-var ideVersionFlag *string
 var buildPathFlag *string
 var verboseFlag *bool
 var forceRebuild *bool
 var exampleFlag *bool
 var quietFlag *bool
 var debugLevelFlag *int
-var warningsLevelFlag *string
 var loggerFlag *string
-var vidPidFlag *string
 
 // Output structure used to generate library_index.json file
 type indexOutput struct {
 	Libraries []indexLibrary `json:"libraries"`
 }
 
-type requiresField struct {
-	Requires []string `json:"requires"`
-}
-
 // Output structure used to generate library_index.json file
 type indexLibrary struct {
-	LibraryName     string           `json:"name"`
-	Version         string           `json:"version"`
-	Author          string           `json:"author"`
-	Maintainer      string           `json:"maintainer"`
-	License         string           `json:"license,omitempty"`
-	Sentence        string           `json:"sentence"`
-	Paragraph       string           `json:"paragraph,omitempty"`
-	Website         string           `json:"website,omitempty"`
-	Category        string           `json:"category,omitempty"`
-	Architectures   []string         `json:"architectures,omitempty"`
-	Types           []string         `json:"types,omitempty"`
-	Requires        *json.RawMessage `json:"requires"`
-	URL             string           `json:"url"`
-	ArchiveFileName string           `json:"archiveFileName"`
-	Size            int64            `json:"size"`
-	Checksum        string           `json:"checksum"`
+	LibraryName     string   `json:"name"`
+	Version         string   `json:"version"`
+	Author          string   `json:"author"`
+	Maintainer      string   `json:"maintainer"`
+	License         string   `json:"license,omitempty"`
+	Sentence        string   `json:"sentence"`
+	Paragraph       string   `json:"paragraph,omitempty"`
+	Website         string   `json:"website,omitempty"`
+	Category        string   `json:"category,omitempty"`
+	Architectures   []string `json:"architectures,omitempty"`
+	Types           []string `json:"types,omitempty"`
+	Requires        []string `json:"requires, omitempty"`
+	URL             string   `json:"url"`
+	ArchiveFileName string   `json:"archiveFileName"`
+	Size            int64    `json:"size"`
+	Checksum        string   `json:"checksum"`
 
 	SupportLevel string `json:"supportLevel,omitempty"`
 }
 
+type indexLibrariesAnalyzed struct {
+	Exists map[string]bool `json:"name"`
+}
+
 func init() {
-	buildOptionsFileFlag = flag.String(FLAG_BUILD_OPTIONS_FILE, "", "Instead of specifying --"+FLAG_HARDWARE+", --"+FLAG_TOOLS+" etc every time, you can load all such options from a file")
 	flag.Var(&hardwareFoldersFlag, FLAG_HARDWARE, "Specify a 'hardware' folder. Can be added multiple times for specifying multiple 'hardware' folders")
 	flag.Var(&toolsFoldersFlag, FLAG_TOOLS, "Specify a 'tools' folder. Can be added multiple times for specifying multiple 'tools' folders")
 	flag.Var(&librariesBuiltInFoldersFlag, FLAG_BUILT_IN_LIBRARIES, "Specify a built-in 'libraries' folder. These are low priority libraries. Can be added multiple times for specifying multiple built-in 'libraries' folders")
 	flag.Var(&librariesFoldersFlag, FLAG_LIBRARIES, "Specify a 'libraries' folder. Can be added multiple times for specifying multiple 'libraries' folders")
-	flag.Var(&customBuildPropertiesFlag, FLAG_PREFS, "Specify a custom preference. Can be added multiple times for specifying multiple custom preferences")
-	fqbnFlag = flag.String(FLAG_FQBN, "", "fully qualified board name")
-	coreAPIVersionFlag = flag.String(FLAG_CORE_API_VERSION, "10800", "version of core APIs (used to populate ARDUINO #define)")
-	ideVersionFlag = flag.String(FLAG_IDE_VERSION, "10800", "[deprecated] use '"+FLAG_CORE_API_VERSION+"' instead")
 	buildPathFlag = flag.String(FLAG_BUILD_PATH, "", "build path")
 	verboseFlag = flag.Bool(FLAG_VERBOSE, false, "if 'true' prints lots of stuff")
 	forceRebuild = flag.Bool("force", false, "if 'true' rebuilds all dependencies from scratch")
 	exampleFlag = flag.Bool("examples", false, "Also compile all the builtin example")
 	quietFlag = flag.Bool(FLAG_QUIET, false, "if 'true' doesn't print any warnings or progress or whatever")
 	debugLevelFlag = flag.Int(FLAG_DEBUG_LEVEL, builder.DEFAULT_DEBUG_LEVEL, "Turns on debugging messages. The higher, the chattier")
-	warningsLevelFlag = flag.String(FLAG_WARNINGS, "", "Sets warnings level. Available values are '"+FLAG_WARNINGS_NONE+"', '"+FLAG_WARNINGS_DEFAULT+"', '"+FLAG_WARNINGS_MORE+"' and '"+FLAG_WARNINGS_ALL+"'")
 	loggerFlag = flag.String(FLAG_LOGGER, FLAG_LOGGER_HUMAN, "Sets type of logger. Available values are '"+FLAG_LOGGER_HUMAN+"', '"+FLAG_LOGGER_MACHINE+"'")
-	vidPidFlag = flag.String(FLAG_VID_PID, "", "specify to use vid/pid specific build properties, as defined in boards.txt")
 	librariesJsonPath = flag.String(FLAG_JSON, "", "specify the starting json file")
 }
 
@@ -164,21 +149,6 @@ func main() {
 	flag.Parse()
 
 	ctx := &types.Context{}
-
-	if *buildOptionsFileFlag != "" {
-		buildOptions := make(properties.Map)
-		if _, err := os.Stat(*buildOptionsFileFlag); err == nil {
-			data, err := ioutil.ReadFile(*buildOptionsFileFlag)
-			if err != nil {
-				printCompleteError(err)
-			}
-			err = json.Unmarshal(data, &buildOptions)
-			if err != nil {
-				printCompleteError(err)
-			}
-		}
-		ctx.InjectBuildOptions(buildOptions)
-	}
 
 	// FLAG json
 	if *librariesJsonPath == "" {
@@ -220,13 +190,6 @@ func main() {
 		ctx.BuiltInLibrariesFolders = librariesBuiltInFolders
 	}
 
-	// FLAG_PREFS
-	if customBuildProperties, err := toSliceOfUnquoted(customBuildPropertiesFlag); err != nil {
-		printCompleteError(err)
-	} else if len(customBuildProperties) > 0 {
-		ctx.CustomBuildProperties = customBuildProperties
-	}
-
 	// FLAG_BUILD_PATH
 	buildPath, err := gohasissues.Unquote(*buildPathFlag)
 	if err != nil {
@@ -253,19 +216,7 @@ func main() {
 
 	ctx.Verbose = *verboseFlag
 
-	// FLAG_IDE_VERSION
-	if ctx.ArduinoAPIVersion == "" {
-		// if deprecated "--ideVersionFlag" has been used...
-		if *coreAPIVersionFlag == "10600" && *ideVersionFlag != "10600" {
-			ctx.ArduinoAPIVersion = *ideVersionFlag
-		} else {
-			ctx.ArduinoAPIVersion = *coreAPIVersionFlag
-		}
-	}
-
-	if *warningsLevelFlag != "" {
-		ctx.WarningsLevel = *warningsLevelFlag
-	}
+	ctx.ArduinoAPIVersion = "10800"
 
 	if *debugLevelFlag > -1 {
 		ctx.DebugLevel = *debugLevelFlag
@@ -287,6 +238,16 @@ func main() {
 	ctx.BuildCachePath = buildCachePath
 
 	var indexJson indexOutput
+	var previousRun indexLibrariesAnalyzed
+	previousRun.Exists = make(map[string]bool)
+
+	prev, _ := ioutil.ReadFile("cached_results.json")
+	err = json.Unmarshal(prev, &previousRun)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+
 	dec, _ := ioutil.ReadFile(*librariesJsonPath)
 
 	err = json.Unmarshal(dec, &indexJson)
@@ -317,18 +278,23 @@ func main() {
 			continue
 		}
 
-		if indexJson.Libraries[libIndex].Requires != nil && *forceRebuild == false {
+		if previousRun.Exists[library.Name] == true && *forceRebuild == false {
 			// we already have analyzed the dependencies, skip
 			// if forceRebuild == true, rebuild them anyway
-			fmt.Println(string(*indexJson.Libraries[libIndex].Requires))
 			continue
 		}
+
+		// symlink the folder to a folder called RealName so it gets picked up
 
 		if library.Archs[0] == "*" || utils.SliceContains(library.Archs, "avr") {
 			ctx.FQBN = "arduino:avr:micro"
 		}
 		if strings.Contains(library.Name, "Robot") {
-			ctx.FQBN = "arduino:avr:robotControl"
+			if strings.Contains(library.Name, "Control") {
+				ctx.FQBN = "arduino:avr:robotControl"
+			} else {
+				ctx.FQBN = "arduino:avr:robotMotor"
+			}
 		}
 		if strings.Contains(library.Name, "Adafruit") && strings.Contains(library.Name, "Playground") {
 			ctx.FQBN = "arduino:avr:circuitplay32u4cat"
@@ -387,35 +353,32 @@ func main() {
 		fmt.Print(deps)
 		fmt.Print(" provided by lib manager and ")
 		fmt.Print(internal_deps)
-		fmt.Println(" provided by cores or builtin")
+		fmt.Print(" provided by cores or builtin")
 
 		if err != nil {
-			err = i18n.WrapError(err)
-
-			fmt.Fprintln(os.Stderr, err)
-
-			if ctx.DebugLevel >= 10 {
-				fmt.Fprintln(os.Stderr, err.(*errors.Error).ErrorStack())
-			}
-
-			// TODO: try to recompile the library with another architecture
-
+			fmt.Println(" but failed to compile on " + ctx.FQBN)
+		} else {
+			fmt.Println("")
 		}
-
-		// TODO: HACK: WARNING: ATTENTION: are examples really important? Or can we stick to the "base" experience?
-		//continue
 
 		if *exampleFlag == true {
 
 			// search for examples and compile them
 			libraryExamplesPath := filepath.Join(library.Folder, "examples")
 			examples, _ := findFilesInFolder(libraryExamplesPath, ".ino", true)
+
+			var errors_examples []string
+
 			for _, example := range examples {
 				ctx.SketchLocation = example
 				ctx.ImportedLibraries = ctx.ImportedLibraries[:0]
 				ctx.IncludeFolders = ctx.IncludeFolders[:0]
 
 				err = builder.RunBuilder(ctx)
+
+				if err != nil {
+					errors_examples = append(errors_examples, err.Error())
+				}
 
 				for _, dep := range ctx.ImportedLibraries {
 					if dep.RealName != library.RealName && !utils.SliceContains(deps, dep.RealName) && !utils.SliceContains(internal_deps, dep.RealName) {
@@ -433,33 +396,30 @@ func main() {
 			fmt.Print(internal_deps)
 			fmt.Print(" provided by cores or builtin")
 
-			if err != nil {
-				fmt.Println(" but failed to compile on " + ctx.FQBN)
+			if len(errors_examples) > 0 {
+				fmt.Println(" but " + string(len(errors_examples)) + " failed to compile on " + ctx.FQBN)
+				// fmt.Println(errors_examples)
 			} else {
 				fmt.Println("")
 			}
 
 		}
 
-		indexJson.Libraries[libIndex].Requires = new(json.RawMessage)
-
-		*indexJson.Libraries[libIndex].Requires, _ = json.Marshal(deps)
-		fmt.Println(string(*indexJson.Libraries[libIndex].Requires))
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		tempJson, _ := json.MarshalIndent(&indexJson.Libraries[libIndex], "", "    ")
-		fmt.Println(string(tempJson))
+		indexJson.Libraries[libIndex].Requires = deps
+		previousRun.Exists[library.Name] = true
 	}
 
 	finalJson, err := json.MarshalIndent(&indexJson, "", "    ")
 	if err != nil {
 		fmt.Println(err.Error())
 	}
-	fmt.Println("finalJson")
-	fmt.Println(string(finalJson))
 	ioutil.WriteFile(*librariesJsonPath, finalJson, 0666)
+
+	previousRunJson, err := json.MarshalIndent(&previousRun, "", "    ")
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	ioutil.WriteFile("cached_results.json", previousRunJson, 0666)
 }
 
 func indexJsonContains(index []indexLibrary, name, version string) int {
