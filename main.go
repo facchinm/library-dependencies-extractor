@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -118,6 +119,7 @@ type indexLibrary struct {
 	Architectures   []string `json:"architectures,omitempty"`
 	Types           []string `json:"types,omitempty"`
 	Requires        []string `json:"requires, omitempty"`
+	CouldRequire    []string `json:"couldRequire, omitempty"`
 	URL             string   `json:"url"`
 	ArchiveFileName string   `json:"archiveFileName"`
 	Size            int64    `json:"size"`
@@ -267,6 +269,13 @@ func main() {
 			fmt.Println(err.Error())
 		}
 		ioutil.WriteFile(*librariesJsonPath, tempJsonCTRL, 0666)
+
+		tempPreviousRunJson, err := json.MarshalIndent(&previousRun, "", "    ")
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+		ioutil.WriteFile("cached_results.json", tempPreviousRunJson, 0666)
+
 		fmt.Println("Exiting due to CTRL+C")
 		os.Exit(2)
 	}()
@@ -287,7 +296,7 @@ func main() {
 		}
 
 		// symlink the folder to a folder called RealName so it gets picked up
-		symlinkWithBestName := filepath.Join(library.Folder, "..", library.RealName)
+		symlinkWithBestName := filepath.Join(library.Folder, "..", strings.Replace(library.RealName, " ", "_", -1))
 		usingSymlink := false
 		if symlinkWithBestName != library.Folder {
 			os.Symlink(library.Folder, symlinkWithBestName)
@@ -304,6 +313,9 @@ func main() {
 			} else {
 				ctx.FQBN = "arduino:avr:robotMotor"
 			}
+		}
+		if strings.Contains(library.Name, "Yun") {
+			ctx.FQBN = "arduino:avr:yun"
 		}
 		if strings.Contains(library.Name, "Adafruit") && strings.Contains(library.Name, "Playground") {
 			ctx.FQBN = "arduino:avr:circuitplay32u4cat"
@@ -338,6 +350,16 @@ func main() {
 
 		err = builder.RunBuilder(ctx)
 
+		safeTargets := []string{"arduino:avr:uno", "arduino:avr:mega:cpu=atmega2560", "esp8266:esp8266:nodemcuv2:CpuFrequency=80,UploadSpeed=115200,FlashSize=4M3M"}
+
+		tries := 0
+		for err != nil && tries < len(safeTargets) {
+			// try recompling for safer targets
+			ctx.FQBN = safeTargets[tries]
+			tries++
+			err = builder.RunBuilder(ctx)
+		}
+
 		os.Remove(tempDir)
 		os.RemoveAll(tempDir)
 		// clean buildPath/libraries folder (at least)
@@ -370,6 +392,10 @@ func main() {
 			fmt.Println("")
 		}
 
+		indexJson.Libraries[libIndex].Requires = deps
+
+		backup_fqbn := ""
+
 		if *exampleFlag == true {
 
 			// search for examples and compile them
@@ -382,6 +408,13 @@ func main() {
 				ctx.SketchLocation = example
 				ctx.ImportedLibraries = ctx.ImportedLibraries[:0]
 				ctx.IncludeFolders = ctx.IncludeFolders[:0]
+
+				if strings.Contains(strings.ToUpper(ctx.SketchLocation), "YUN") {
+					backup_fqbn = ctx.FQBN
+					ctx.FQBN = "arduino:avr:yun"
+				} else if backup_fqbn != "" {
+					ctx.FQBN = backup_fqbn
+				}
 
 				err = builder.RunBuilder(ctx)
 
@@ -405,8 +438,10 @@ func main() {
 			fmt.Print(internal_deps)
 			fmt.Print(" provided by cores or builtin")
 
+			indexJson.Libraries[libIndex].CouldRequire = deps
+
 			if len(errors_examples) > 0 {
-				fmt.Println(" but " + string(len(errors_examples)) + " failed to compile on " + ctx.FQBN)
+				fmt.Println(" but " + strconv.Itoa(len(errors_examples)) + " failed to compile on " + ctx.FQBN)
 				// fmt.Println(errors_examples)
 			} else {
 				fmt.Println("")
@@ -418,7 +453,6 @@ func main() {
 			os.RemoveAll(symlinkWithBestName)
 		}
 
-		indexJson.Libraries[libIndex].Requires = deps
 		previousRun.Exists[library.Name] = true
 	}
 
@@ -450,12 +484,12 @@ func includeHeadersFromLibraryFolder(library *types.Library) string {
 	includedLibs := 0
 	for _, header := range headers {
 		if textdistance.JaroWinklerDistance(filepath.Base(header), library.Name) > 0.9 {
-			temp += "#include \"" + filepath.Base(header) + "\"\n"
+			temp += "#include <" + filepath.Base(header) + ">\n"
 			includedLibs += 1
 		}
 	}
 	if includedLibs == 0 && len(headers) > 0 {
-		temp += "#include \"" + filepath.Base(headers[0]) + "\"\n"
+		temp += "#include <" + filepath.Base(headers[0]) + ">\n"
 	}
 	return temp
 }
