@@ -241,11 +241,13 @@ func main() {
 	var previousRun indexLibrariesAnalyzed
 	previousRun.Exists = make(map[string]bool)
 
-	prev, _ := ioutil.ReadFile("cached_results.json")
-	err = json.Unmarshal(prev, &previousRun)
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
+	prev, err := ioutil.ReadFile("cached_results.json")
+	if err == nil {
+		err = json.Unmarshal(prev, &previousRun)
+		if err != nil {
+			fmt.Println(err.Error())
+			os.Exit(1)
+		}
 	}
 
 	dec, _ := ioutil.ReadFile(*librariesJsonPath)
@@ -285,6 +287,13 @@ func main() {
 		}
 
 		// symlink the folder to a folder called RealName so it gets picked up
+		symlinkWithBestName := filepath.Join(library.Folder, "..", library.RealName)
+		usingSymlink := false
+		if symlinkWithBestName != library.Folder {
+			os.Symlink(library.Folder, symlinkWithBestName)
+			usingSymlink = true
+			fmt.Println("symlinking " + library.Folder + " to " + symlinkWithBestName)
+		}
 
 		if library.Archs[0] == "*" || utils.SliceContains(library.Archs, "avr") {
 			ctx.FQBN = "arduino:avr:micro"
@@ -303,7 +312,7 @@ func main() {
 			ctx.FQBN = "arduino:sam:arduino_due_x_dbg"
 		}
 		if utils.SliceContains(library.Archs, "samd") {
-			ctx.FQBN = "arduino:samd:arduino_zero_edbg"
+			ctx.FQBN = "arduino:samd:mkr1000"
 		}
 		if utils.SliceContains(library.Archs, "arc32") {
 			ctx.FQBN = "Intel:arc32:arduino_101"
@@ -403,6 +412,10 @@ func main() {
 				fmt.Println("")
 			}
 
+		}
+
+		if usingSymlink {
+			os.RemoveAll(symlinkWithBestName)
 		}
 
 		indexJson.Libraries[libIndex].Requires = deps
