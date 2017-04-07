@@ -325,6 +325,9 @@ func main() {
 		}
 		if utils.SliceContains(library.Archs, "samd") {
 			ctx.FQBN = "arduino:samd:mkr1000"
+			if strings.Contains(library.Name, "Fox") {
+				ctx.FQBN = "arduino:samd:mkrfox1200"
+			}
 		}
 		if utils.SliceContains(library.Archs, "arc32") {
 			ctx.FQBN = "Intel:arc32:arduino_101"
@@ -350,7 +353,7 @@ func main() {
 
 		err = builder.RunBuilder(ctx)
 
-		safeTargets := []string{"arduino:avr:uno", "arduino:avr:mega:cpu=atmega2560", "esp8266:esp8266:nodemcuv2:CpuFrequency=80,UploadSpeed=115200,FlashSize=4M3M"}
+		safeTargets := []string{"arduino:avr:uno", "arduino:avr:mega:cpu=atmega2560"}
 
 		tries := 0
 		for err != nil && tries < len(safeTargets) {
@@ -479,13 +482,22 @@ func indexJsonContains(index []indexLibrary, name, version string) int {
 }
 
 func includeHeadersFromLibraryFolder(library *types.Library) string {
-	headers, _ := findFilesInFolder(library.Folder, ".h", true)
+	headers, _ := findFilesInFolder(library.Folder, ".h", false)
+	if len(headers) == 0 {
+		// no file in base dir, search src folder
+		headers, _ = findFilesInFolder(library.SrcFolder, ".h", false)
+	}
+	if len(headers) == 0 {
+		// no file in src folder either, search recursively (and probably fail)
+		headers, _ = findFilesInFolder(library.Folder, ".h", true)
+	}
 	temp := "\n"
 	includedLibs := 0
 	for _, header := range headers {
 		if textdistance.JaroWinklerDistance(filepath.Base(header), library.Name) > 0.9 {
 			temp += "#include <" + filepath.Base(header) + ">\n"
 			includedLibs += 1
+			break
 		}
 	}
 	if includedLibs == 0 && len(headers) > 0 {
