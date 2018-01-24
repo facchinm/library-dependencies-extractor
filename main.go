@@ -19,7 +19,7 @@ import (
 	"arduino.cc/builder/types"
 	"arduino.cc/builder/utils"
 	"github.com/go-errors/errors"
-	"github.com/masatana/go-textdistance"
+	textdistance "github.com/masatana/go-textdistance"
 )
 
 const VERSION = "1.3.24"
@@ -99,6 +99,7 @@ var exampleFlag *bool
 var quietFlag *bool
 var debugLevelFlag *int
 var loggerFlag *string
+var findComposite *bool
 
 // Output structure used to generate library_index.json file
 type indexOutput struct {
@@ -145,6 +146,7 @@ func init() {
 	debugLevelFlag = flag.Int(FLAG_DEBUG_LEVEL, builder.DEFAULT_DEBUG_LEVEL, "Turns on debugging messages. The higher, the chattier")
 	loggerFlag = flag.String(FLAG_LOGGER, FLAG_LOGGER_HUMAN, "Sets type of logger. Available values are '"+FLAG_LOGGER_HUMAN+"', '"+FLAG_LOGGER_MACHINE+"'")
 	librariesJsonPath = flag.String(FLAG_JSON, "", "specify the starting json file")
+	findComposite = flag.Bool("composite", false, "search for likely composite libraries")
 }
 
 func main() {
@@ -230,6 +232,11 @@ func main() {
 		ctx.SetLogger(i18n.MachineLogger{})
 	} else {
 		ctx.SetLogger(i18n.HumanLogger{})
+	}
+
+	if *findComposite {
+		printLibraries(ctx.OtherLibrariesFolders)
+		return
 	}
 
 	// Populate libraries, temporary FQBN
